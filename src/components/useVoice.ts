@@ -2,12 +2,16 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+export type VoiceError = "blocked" | "network" | "no-mic" | "unresponsive";
+
 export interface ListenOptions {
   /** ms of silence after you stop talking before the answer is submitted */
   silenceMs?: number;
   /** ignore pauses until at least this many words were heard */
   minWords?: number;
   onDone: (text: string) => void;
+  /** called once when listening cannot work (blocked mic, no internet for the speech service, no audio) */
+  onError?: (kind: VoiceError) => void;
 }
 
 /** split into short chunks: Chrome silently stops long utterances after ~15 seconds */
@@ -33,6 +37,7 @@ export function useVoice() {
   const [listening, setListening] = useState(false);
   const [text, setText] = useState("");
   const [blocked, setBlocked] = useState(false);
+  const [error, setError] = useState<VoiceError | null>(null);
 
   const speakToken = useRef(0);
   const recRef = useRef<any>(null);
@@ -41,6 +46,7 @@ export function useVoice() {
   const interimRef = useRef("");
   const timerRef = useRef<any>(null);
   const optsRef = useRef<ListenOptions | null>(null);
+  const quickFails = useRef(0);   // sessions that ended almost immediately, in a row
 
   useEffect(() => {
     const w = window as any;
@@ -96,7 +102,7 @@ export function useVoice() {
     clearTimer();
     try { recRef.current?.stop(); } catch { /* already stopped */ }
     const t = currentText();
-    finalRef.current = ""; interimRef.current = ""; setText("");
+    finalRef.current = ""; interimRef.current = ""; setText(""); setListening(false);
     optsRef.current = null;
     o?.onDone(t);
   }, []);
@@ -110,6 +116,16 @@ export function useVoice() {
     }, o.silenceMs ?? 2800);
   }, [finish]);
 
+  /** Listening cannot work: stop cleanly, remember why, and tell the caller once. */
+  const fail = useCallback((kind: VoiceError) => {
+    const o = optsRef.current;
+    wantRef.current = false; clearTimer();
+    try { recRef.current?.abort?.(); } catch { /* ignore */ }
+    setListening(false); setError(kind); if (kind === "blocked") setBlocked(true);
+    optsRef.current = null;
+    o?.onError?.(kind);
+  }, []);
+
   /** Starts listening. Returns false when this browser has no speech recognition. */
   const listen = useCallback((opts: ListenOptions): boolean => {
     const w = window as any;
@@ -117,38 +133,51 @@ export function useVoice() {
     if (!SR) return false;
     stopSpeaking(); // the mic must never hear the interviewer
     try { recRef.current?.abort?.(); } catch { /* ignore */ }
-    optsRef.current = opts; wantRef.current = true; finalRef.current = ""; interimRef.current = ""; setText(""); setBlocked(false);
+    optsRef.current = opts; wantRef.current = true; finalRef.current = ""; interimRef.current = ""; quickFails.current = 0;
+    setText(""); setBlocked(false); setError(null);
+    // "listening" is what the person sees. It stays on while the browser restarts its session behind the
+    // scenes, so the screen no longer flickers between states.
+    setListening(true);
 
     const start = () => {
       const rec = new SR();
+      const startedAt = Date.now();
       rec.continuous = true;
       rec.interimResults = true;
       rec.lang = /^en/i.test(navigator.language) ? navigator.language : "en-US";
-      rec.onstart = () => setListening(true);
       rec.onresult = (ev: any) => {
+        quickFails.current = 0;
         let interim = "";
         for (let i = ev.resultIndex; i < ev.results.length; i++) {
           const r = ev.results[i];
           if (r.isFinal) finalRef.current += " " + r[0].transcript; else interim += " " + r[0].transcript;
         }
         interimRef.current = interim;
-        setText(currentText());
+        const next = currentText();
+        setText((prev) => (prev === next ? prev : next));
         armTimer();
       };
       rec.onerror = (ev: any) => {
-        if (ev?.error === "not-allowed" || ev?.error === "service-not-allowed") { wantRef.current = false; setBlocked(true); }
+        const e = ev?.error;
+        if (e === "not-allowed" || e === "service-not-allowed") fail("blocked");
+        else if (e === "network") fail("network");
+        else if (e === "audio-capture") fail("no-mic");
+        // "no-speech" and "aborted" are normal: the session ends and is restarted below
       };
       rec.onend = () => {
-        setListening(false); recRef.current = null;
-        // Chrome ends the session after a silence; keep the interview going
-        if (wantRef.current) setTimeout(() => { if (wantRef.current && !recRef.current) start(); }, 250);
+        recRef.current = null;
+        if (!wantRef.current) return;
+        // a session that dies within ~1.5s over and over means no audio is arriving at all
+        if (Date.now() - startedAt < 1500) quickFails.current++; else quickFails.current = 0;
+        if (quickFails.current >= 6) { fail("unresponsive"); return; }
+        setTimeout(() => { if (wantRef.current && !recRef.current) start(); }, 250 + quickFails.current * 250);
       };
       recRef.current = rec;
       try { rec.start(); } catch { recRef.current = null; }
     };
     start();
     return true;
-  }, [armTimer, stopSpeaking]);
+  }, [armTimer, fail, stopSpeaking]);
 
   /** Stop listening without submitting; returns what was heard so far. */
   const stopListening = useCallback((): string => {
@@ -168,5 +197,5 @@ export function useVoice() {
     if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
   }, []);
 
-  return { canSpeak: caps.speak, canListen: caps.listen, speaking, listening, text, blocked, speak, stopSpeaking, listen, stopListening, submitNow };
+  return { canSpeak: caps.speak, canListen: caps.listen, speaking, listening, text, blocked, error, speak, stopSpeaking, listen, stopListening, submitNow };
 }

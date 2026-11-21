@@ -98,7 +98,7 @@ export function heuristicEvaluate(question: string, keyPoints: string[], answer:
       : "Define the concept in one sentence, explain how it works, give a short example, then mention a trade-off or limitation.",
     suggestedAnswer: `A strong answer covers: ${keyPoints.map((k, i) => `(${i + 1}) ${k}`).join("; ")}.`,
     topicsToRevise: missing.slice(0, 3).map((m) => m.split(/\s+/).slice(0, 6).join(" ")),
-    followUpQuestion: missing.length ? `Can you go deeper on this: ${missing[0]}?` : "What trade-offs or edge cases would you consider here?",
+    followUpQuestion: missing.length ? `Let me push you on one point: ${missing[0].charAt(0).toLowerCase()}${missing[0].slice(1).replace(/[.!?]+$/, "")}. Can you explain how or why?` : "What trade-offs or edge cases would you consider here?",
     mode: "heuristic",
   };
 }
