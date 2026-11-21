@@ -1,0 +1,377 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                String             @id @default(cuid())
+  email             String             @unique
+  passwordHash      String
+  name              String
+  isVerified        Boolean            @default(true)
+  /// bumped on password change/reset so older sessions stop working
+  tokenVersion      Int                @default(0)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  profile           CandidateProfile?
+  jobDescriptions   JobDescription[]
+  resumeVersions    ResumeVersion[]
+  interviewSessions InterviewSession[]
+  learningPlans     LearningPlan[]
+  jobApplications   JobApplication[]
+  notifications     Notification[]
+  passwordResetTokens PasswordResetToken[]
+}
+
+model PasswordResetToken {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// SHA-256 of the emailed token. The raw token is never stored.
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model CandidateProfile {
+  id                      String            @id @default(cuid())
+  userId                  String            @unique
+  user                    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  fullName                String
+  email                   String
+  phone                   String?
+  location                String?
+  linkedInUrl             String?
+  gitHubUrl               String?
+  portfolioUrl            String?
+  professionalSummary     String?
+  
+  // Resume preferences
+  preferredResumeFormat   String            @default("modern-minimal")
+  preferredPageCount      Int               @default(1)
+  preferredTemplate       String            @default("modern-minimal")
+  includePhoto            Boolean           @default(false)
+  photoUrl                String?
+  sectionOrder            String            @default("[\"summary\",\"skills\",\"experience\",\"projects\",\"education\",\"certifications\"]")
+  
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+
+  education               Education[]
+  skills                  CandidateSkill[]
+  projects                Project[]
+  workExperience          WorkExperience[]
+  certifications          Certification[]
+}
+
+model Education {
+  id                String           @id @default(cuid())
+  profileId         String
+  profile           CandidateProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  institution       String
+  degree            String
+  specialization    String
+  startYear         Int
+  graduationYear    Int
+  cgpaOrPercentage  String?
+  relevantCoursework String?
+  
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+}
+
+model CandidateSkill {
+  id                        String           @id @default(cuid())
+  profileId                 String
+  profile                   CandidateProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  name                      String
+  category                  String           // e.g. Programming languages, Frameworks, Databases, AI/ML, Cloud, Soft skills
+  proficiencyLevel          String           // "Not familiar", "Just started", "Beginner", "Basic working knowledge", "Intermediate", "Advanced", "Expert"
+  usedInProject             Boolean          @default(false)
+  usedAcademically          Boolean          @default(false)
+  usedProfessionally        Boolean          @default(false)
+  lastUsedDate              String?
+  practicalExperienceNotes  String?
+  
+  evidence                  SkillEvidence[]
+
+  createdAt                 DateTime         @default(now())
+  updatedAt                 DateTime         @updatedAt
+}
+
+model SkillEvidence {
+  id          String         @id @default(cuid())
+  skillId     String
+  skill       CandidateSkill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  
+  evidenceType String        // "PROJECT", "WORK_EXPERIENCE", "EDUCATION", "CERTIFICATION"
+  title        String
+  description  String?
+  link         String?
+  createdAt    DateTime       @default(now())
+}
+
+model Project {
+  id                     String           @id @default(cuid())
+  profileId              String
+  profile                CandidateProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  title                  String
+  description            String
+  problemStatement       String?
+  technologies           String           // JSON string of string[]
+  candidateContribution  String
+  keyFeatures            String           // JSON string of string[]
+  measurableResults      String?          // JSON string of string[]
+  githubUrl              String?
+  liveDemoUrl            String?
+  category               String           @default("Full Stack")
+  status                 String           @default("Completed")
+  
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+}
+
+model WorkExperience {
+  id              String           @id @default(cuid())
+  profileId       String
+  profile         CandidateProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  company         String
+  position        String
+  employmentType  String           @default("Full-time") // "Full-time", "Internship", "Part-time", "Contract"
+  startDate       String
+  endDate         String?
+  isCurrent       Boolean          @default(false)
+  responsibilities String          // JSON string of string[]
+  achievements    String?          // JSON string of string[]
+  technologies    String           // JSON string of string[]
+  
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+model Certification {
+  id                  String           @id @default(cuid())
+  profileId           String
+  profile             CandidateProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  name                String
+  issuingOrganization String
+  issueDate           String
+  credentialUrl       String?
+  credentialId        String?
+  type                String           @default("CERTIFICATION") // "CERTIFICATION", "ACHIEVEMENT", "PUBLICATION", "HACKATHON", "AWARD"
+  
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+}
+
+model JobDescription {
+  id              String           @id @default(cuid())
+  userId          String
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  companyName     String
+  jobTitle        String
+  location        String?
+  rawText         String
+  sourceUrl       String?
+  extractedData   String           // JSON string of ExtractedJDData
+  
+  matches         JDMatch[]
+  resumeVersions  ResumeVersion[]
+  interviewSessions InterviewSession[]
+
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+model JDMatch {
+  id                    String         @id @default(cuid())
+  jobDescriptionId      String
+  jobDescription        JobDescription @relation(fields: [jobDescriptionId], references: [id], onDelete: Cascade)
+  userId                String
+  
+  overallScore          Int            // 0 - 100
+  requiredSkillsScore   Int            // 0 - 100
+  preferredSkillsScore  Int            // 0 - 100
+  
+  matchedSkills         String         // JSON of MatchedSkill[]
+  partiallyMatchedSkills String        // JSON of PartialMatch[]
+  learningSkills        String         // JSON of LearningSkill[]
+  missingMandatorySkills String        // JSON of MissingSkill[]
+  missingPreferredSkills String        // JSON of MissingSkill[]
+  suggestedImprovements String         // JSON of Suggestion[]
+  
+  createdAt             DateTime       @default(now())
+}
+
+model ResumeVersion {
+  id                  String          @id @default(cuid())
+  userId              String
+  user                User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  jobDescriptionId    String?
+  jobDescription      JobDescription? @relation(fields: [jobDescriptionId], references: [id], onDelete: SetNull)
+  
+  versionName         String          // e.g. "Google - Senior Frontend Engineer"
+  targetRole          String
+  targetCompany       String
+  templateId          String          @default("modern-minimal")
+  
+  // Snapshots protect against master profile mutation
+  snapshotProfileData String          // Complete JSON copy of CandidateProfile at generation time
+  tailoredContent     String          // JSON of TailoredResumeContent (customized bullets, prioritized skills, ordering)
+  diffNotes           String?         // JSON of reviewable differences
+  isPrimary           Boolean         @default(false)
+  
+  jobApplications     JobApplication[]
+  interviewSessions   InterviewSession[]
+
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+}
+
+model InterviewSession {
+  id                  String              @id @default(cuid())
+  userId              String
+  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  jobDescriptionId    String?
+  jobDescription      JobDescription?     @relation(fields: [jobDescriptionId], references: [id], onDelete: SetNull)
+  
+  resumeVersionId     String?
+  resumeVersion       ResumeVersion?      @relation(fields: [resumeVersionId], references: [id], onDelete: SetNull)
+  
+  targetRole          String
+  targetCompany       String?
+  interviewType       String              // "TECHNICAL", "HR", "BEHAVIORAL", "PROJECT_BASED", "ROLE_SPECIFIC", "MIXED"
+  difficulty          String              @default("INTERMEDIATE") // "BEGINNER", "INTERMEDIATE", "ADVANCED"
+  mode                String              @default("TEXT") // "TEXT", "VOICE"
+  status              String              @default("IN_PROGRESS") // "IN_PROGRESS", "COMPLETED", "ABANDONED"
+  
+  overallScore        Int?
+  technicalScore      Int?
+  communicationScore  Int?
+  knowledgeScore      Int?
+  summaryFeedback     String?
+  strongAreas         String?             // JSON string of string[]
+  weakAreas           String?             // JSON string of string[]
+  recommendedTopics   String?             // JSON string of string[]
+  
+  questions           InterviewQuestion[]
+
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+}
+
+model InterviewQuestion {
+  id                        String            @id @default(cuid())
+  sessionId                 String
+  session                   InterviewSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  questionIndex             Int
+  questionText              String
+  category                  String
+  difficulty                String
+  expectedKeyPoints         String?           // JSON string of string[]
+  
+  userResponseText          String?
+  isVoiceResponse           Boolean           @default(false)
+  
+  evaluatedAt               DateTime?
+  score                     Int?              // 0 - 100
+  technicalCorrectness      Int?              // 0 - 100
+  clarity                   Int?              // 0 - 100
+  completeness              Int?              // 0 - 100
+  
+  feedbackWhatWasCorrect    String?
+  feedbackWhatWasMissing    String?
+  feedbackWhatWasIncorrect  String?
+  betterAnswerStructure     String?
+  suggestedAnswer           String?
+  topicsToRevise            String?           // JSON string of string[]
+  followUpQuestion          String?
+  
+  createdAt                 DateTime          @default(now())
+}
+
+model LearningPlan {
+  id                  String             @id @default(cuid())
+  userId              String
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  skillName           String
+  targetRole          String
+  currentProficiency  String             // e.g. "Not familiar" or "Just started"
+  targetProficiency   String             // e.g. "Intermediate"
+  status              String             @default("IN_PROGRESS") // "NOT_STARTED", "IN_PROGRESS", "COMPLETED"
+  
+  roadmapStages       String             // JSON string of StructuredRoadmap
+  progressPercent     Int                @default(0)
+  
+  progressItems       LearningProgress[]
+
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+}
+
+model LearningProgress {
+  id             String       @id @default(cuid())
+  planId         String
+  plan           LearningPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  
+  stage          String       // "BEGINNER", "INTERMEDIATE", "ADVANCED"
+  itemTitle      String
+  itemType       String       // "EXERCISE", "PROJECT", "RESOURCE"
+  isCompleted    Boolean      @default(false)
+  completedAt    DateTime?
+  
+  createdAt      DateTime     @default(now())
+}
+
+model JobApplication {
+  id               String         @id @default(cuid())
+  userId           String
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  resumeVersionId  String?
+  resumeVersion    ResumeVersion? @relation(fields: [resumeVersionId], references: [id], onDelete: SetNull)
+  
+  company          String
+  role             String
+  appliedDate      String
+  status           String         @default("APPLIED") // "INTERESTED", "APPLIED", "ASSESSMENT", "INTERVIEW", "SELECTED", "REJECTED"
+  interviewDate    String?
+  followUpDate     String?
+  notes            String?
+  
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  title     String
+  message   String
+  type      String   @default("SYSTEM") // "PRACTICE_REMINDER", "LEARNING_GOAL", "PROFILE_INCOMPLETE", "APPLICATION_FOLLOWUP", "SYSTEM"
+  isRead    Boolean  @default(false)
+  link      String?
+  
+  createdAt DateTime @default(now())
+}
